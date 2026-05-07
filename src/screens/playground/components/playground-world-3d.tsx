@@ -27,35 +27,37 @@ import { useHermesWorldSettings } from './hermesworld-settings'
  * the result resolves.
  */
 const _glbPresence = new Map<string, 'unknown' | 'present' | 'missing'>()
-function useGlbAvailable(id: string): boolean {
+function npcGlbUrl(id: string) {
+  const safe = id.replace(/[^a-z0-9_-]+/gi, '') || 'villager-common'
+  return `/assets/hermesworld/characters/${safe}.glb`
+}
+function useGlbAvailable(id: string, enabled: boolean): boolean {
   const [_, force] = useState(0)
-  const cached = _glbPresence.get(id)
+  const url = npcGlbUrl(id)
+  const cached = _glbPresence.get(url)
   useEffect(() => {
-    if (cached === 'present' || cached === 'missing') return
+    if (!enabled || cached === 'present' || cached === 'missing') return
     if (typeof window === 'undefined') return
-    _glbPresence.set(id, 'unknown')
+    _glbPresence.set(url, 'unknown')
     let cancelled = false
-    // TanStack Start's catch-all SSRs index.html for missing static files,
-    // returning 200 + text/html. We must inspect content-type to know if a
-    // real GLB is there. GLB files are application/octet-stream or model/gltf-binary.
-    fetch(`/avatars-3d/${id}.glb`, { method: 'HEAD' })
+    fetch(url, { method: 'HEAD' })
       .then((r) => {
         if (cancelled) return
         const ct = r.headers.get('content-type') || ''
         const isReal = r.ok
           && !ct.includes('text/html')
           && (ct.includes('octet-stream') || ct.includes('gltf') || ct.includes('binary') || ct === '' || ct.includes('application/'))
-        _glbPresence.set(id, isReal ? 'present' : 'missing')
+        _glbPresence.set(url, isReal ? 'present' : 'missing')
         force((n) => n + 1)
       })
       .catch(() => {
         if (cancelled) return
-        _glbPresence.set(id, 'missing')
+        _glbPresence.set(url, 'missing')
         force((n) => n + 1)
       })
     return () => { cancelled = true }
-  }, [id, cached])
-  return cached === 'present'
+  }, [cached, enabled, url])
+  return enabled && cached === 'present'
 }
 
 function useAvatarConfig() {
@@ -1237,7 +1239,8 @@ function NPC({
   const ref = useRef<THREE.Group>(null)
   const base = useMemo(() => new THREE.Vector3(...position), [position])
   const phase = useMemo(() => Math.random() * Math.PI * 2, [])
-  const hasGlb = useGlbAvailable(npcId || avatar)
+  const glbId = npcId || avatar
+  const hasGlb = useGlbAvailable(glbId, isNear || highlight)
 
   // Ambient speech bubble — cycles every ~12-22s with NPC lore lines.
   const [ambient, setAmbient] = useState<string | null>(null)
@@ -1299,7 +1302,7 @@ function NPC({
       </mesh>
       {hasGlb ? (
         // GLB body replaces voxel meshes when /avatars-3d/<id>.glb is present.
-        <PlaygroundNpcGlb npcId={npcId || avatar} />
+        <PlaygroundNpcGlb avatar={glbId} />
       ) : (
         <>
           {/* legs */}
@@ -2802,10 +2805,11 @@ function Scene({
   objectiveTargetId: string | null
   objectivePulseKey: number
 }) {
-  const bots = botsFor(worldId)
+  const bots = useMemo(() => botsFor(worldId), [worldId])
   const world = WORLDS_3D[worldId]
   const [settings] = useHermesWorldSettings()
   const photosensitiveMode = settings.accessibility.photosensitiveMode
+  const visibleRemotePlayers = useMemo(() => Object.values(remotePlayers).filter((r) => r.world === worldId && (r.interior ?? null) === null), [remotePlayers, worldId])
   const moveTarget = useRef<THREE.Vector3 | null>(null)
   const [pingPos, setPingPos] = useState<[number, number, number] | null>(null)
   const [interior, setInterior] = useState<InteriorId | null>(null)
@@ -3030,9 +3034,7 @@ function Scene({
       <SummonedFamiliar playerRef={playerPos} />
 
       {/* Real remote players */}
-      {Object.values(remotePlayers)
-        .filter((r) => r.world === worldId && (r.interior ?? null) === null)
-        .map((remote) => (
+      {visibleRemotePlayers.map((remote) => (
           <Suspense key={remote.id} fallback={null}>
             <RemotePlayer remote={remote} />
           </Suspense>
@@ -3046,6 +3048,26 @@ function Scene({
       ))}
     </>
   )
+}
+
+
+function DevFpsSampler() {
+  const sample = useRef({ last: 0, frames: 0, sum: 0, max: 0, heap: 0 })
+  useFrame(({ clock }, delta) => {
+    if (typeof import.meta !== 'undefined' && !(import.meta as any).env?.DEV) return
+    const now = clock.elapsedTime
+    const ms = delta * 1000
+    const stats = sample.current
+    stats.frames += 1
+    stats.sum += ms
+    stats.max = Math.max(stats.max, ms)
+    if (typeof performance !== 'undefined' && 'memory' in performance) stats.heap = ((performance as any).memory?.usedJSHeapSize || 0) / 1048576
+    if (now - stats.last < 10) return
+    const avgFrame = stats.sum / Math.max(1, stats.frames)
+    console.table([{ scope: 'HermesWorld playground', avgFps: Number((1000 / Math.max(1, avgFrame)).toFixed(1)), avgFrameMs: Number(avgFrame.toFixed(2)), p95FrameMsApprox: Number(stats.max.toFixed(2)), jsHeapMb: stats.heap ? Number(stats.heap.toFixed(1)) : 'n/a', samples: stats.frames }])
+    sample.current = { last: now, frames: 0, sum: 0, max: 0, heap: stats.heap }
+  })
+  return null
 }
 
 /* ── Public component ── */
@@ -3148,8 +3170,28 @@ export function PlaygroundWorld3D({
     }
   }, [sendChat, online, transport, myName, myColor, selfId, remotePlayers, serverCount])
 
+  const remotePublishRef = useRef<{ sig: string; ts: number; timer: number | null }>({ sig: '', ts: 0, timer: null })
   useEffect(() => {
-    onRemotePlayersChange?.(remotePlayers)
+    if (!onRemotePlayersChange) return
+    const sig = Object.values(remotePlayers).map((player) => `${player.id}:${player.world}:${player.x.toFixed(1)}:${player.z.toFixed(1)}:${player.ts}:${player.lastChatAt ?? 0}`).sort().join('|')
+    if (sig === remotePublishRef.current.sig) return
+    const isMobile = typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse), (max-width: 760px)').matches
+    const minDelay = isMobile ? 50 : 0
+    const elapsed = Date.now() - remotePublishRef.current.ts
+    const publish = () => {
+      remotePublishRef.current = { sig, ts: Date.now(), timer: null }
+      onRemotePlayersChange(remotePlayers)
+    }
+    if (elapsed >= minDelay) {
+      publish()
+      return
+    }
+    if (remotePublishRef.current.timer != null) window.clearTimeout(remotePublishRef.current.timer)
+    remotePublishRef.current.timer = window.setTimeout(publish, minDelay - elapsed)
+    return () => {
+      if (remotePublishRef.current.timer != null) window.clearTimeout(remotePublishRef.current.timer)
+      remotePublishRef.current.timer = null
+    }
   }, [onRemotePlayersChange, remotePlayers])
 
   return (
@@ -3190,6 +3232,7 @@ export function PlaygroundWorld3D({
         }}
       >
         <Suspense fallback={null}>
+          <DevFpsSampler />
           <EffectComposer enableNormalPass={false}>
             <Bloom mipmapBlur intensity={photosensitiveMode ? 0.18 : 0.78} luminanceThreshold={0.72} luminanceSmoothing={0.35} radius={0.85} />
             <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />

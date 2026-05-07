@@ -1,15 +1,11 @@
-import { Component, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Component, lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { PlaygroundActionBar } from './components/playground-actionbar'
 import { PlaygroundAdminPanel } from './components/playground-admin-panel'
 import { PlaygroundChat, type ChatMessage } from './components/playground-chat'
-import { PlaygroundCustomizer } from './components/playground-customizer'
 import { PlaygroundDialog } from './components/playground-dialog'
 import { PlaygroundHeroCanvas } from './components/playground-hero-canvas'
 import { PlaygroundHud } from './components/playground-hud'
-import { PlaygroundJournal } from './components/playground-journal'
-import { PlaygroundMap } from './components/playground-map'
 import { PlaygroundMinimap } from './components/playground-minimap'
-import { PlaygroundSidePanel } from './components/playground-sidepanel'
 import { PlaygroundWorld3D } from './components/playground-world-3d'
 import { Toast } from './components/toast'
 import { FpsCounter } from './components/fps-counter'
@@ -24,6 +20,16 @@ import { botsFor } from './lib/playground-bots'
 import { itemById, PLAYGROUND_WORLDS, type PlaygroundItemId, type PlaygroundWorldId } from './lib/playground-rpg'
 import type { RemotePlayer } from './hooks/use-playground-multiplayer'
 import { useWorkspaceStore } from '@/stores/workspace-store'
+
+
+const PlaygroundCustomizer = lazy(() => import('./components/playground-customizer').then((module) => ({ default: module.PlaygroundCustomizer })))
+const PlaygroundJournal = lazy(() => import('./components/playground-journal').then((module) => ({ default: module.PlaygroundJournal })))
+const PlaygroundMap = lazy(() => import('./components/playground-map').then((module) => ({ default: module.PlaygroundMap })))
+const PlaygroundSidePanel = lazy(() => import('./components/playground-sidepanel').then((module) => ({ default: module.PlaygroundSidePanel })))
+
+function LazyPanelBoundary({ children }: { children: ReactNode }) {
+  return <Suspense fallback={null}>{children}</Suspense>
+}
 
 const WORLD_META: Record<PlaygroundWorldId, { name: string; accent: string }> = {
   training: { name: 'Training Grounds', accent: '#5eead4' },
@@ -539,12 +545,16 @@ export function PlaygroundScreen() {
           onCustomize={() => setCustomizerOpen(true)}
           onEnter={() => setLaunched(true)}
         />
-        <PlaygroundCustomizer
-          open={customizerOpen}
-          onClose={() => setCustomizerOpen(false)}
-          value={rpg.state.playerProfile.avatarConfig}
-          onChange={rpg.setAvatarConfig}
-        />
+        {customizerOpen ? (
+          <LazyPanelBoundary>
+            <PlaygroundCustomizer
+              open={customizerOpen}
+              onClose={() => setCustomizerOpen(false)}
+              value={rpg.state.playerProfile.avatarConfig}
+              onChange={rpg.setAvatarConfig}
+            />
+          </LazyPanelBoundary>
+        ) : null}
       </>
     )
   }
@@ -589,28 +599,33 @@ export function PlaygroundScreen() {
           onGrantSkillXp={(skills) => rpg.grantSkillXp(skills)}
           onChoice={onDialogChoice}
         />
-        <PlaygroundJournal open={journalOpen} onClose={() => setJournalOpen(false)} state={rpg.state} />
-        <PlaygroundCustomizer
-          open={customizerOpen}
-          onClose={() => setCustomizerOpen(false)}
-          value={rpg.state.playerProfile.avatarConfig}
-          onChange={rpg.setAvatarConfig}
-        />
-        <PlaygroundMap
-          open={mapOpen}
-          onClose={() => setMapOpen(false)}
-          currentWorld={world}
-          unlocked={rpg.state.unlockedWorlds}
-          onTravel={(id) => {
-            if (!rpg.state.unlockedWorlds.includes(id)) return
-            setTransitioning(true)
-            window.setTimeout(() => {
-              setWorld(id)
-              setMapOpen(false)
-              window.setTimeout(() => setTransitioning(false), 350)
-            }, 280)
-          }}
-        />
+        {journalOpen ? (
+          <LazyPanelBoundary><PlaygroundJournal open={journalOpen} onClose={() => setJournalOpen(false)} state={rpg.state} /></LazyPanelBoundary>
+        ) : null}
+        {customizerOpen ? (
+          <LazyPanelBoundary>
+            <PlaygroundCustomizer open={customizerOpen} onClose={() => setCustomizerOpen(false)} value={rpg.state.playerProfile.avatarConfig} onChange={rpg.setAvatarConfig} />
+          </LazyPanelBoundary>
+        ) : null}
+        {mapOpen ? (
+          <LazyPanelBoundary>
+            <PlaygroundMap
+              open={mapOpen}
+              onClose={() => setMapOpen(false)}
+              currentWorld={world}
+              unlocked={rpg.state.unlockedWorlds}
+              onTravel={(id) => {
+                if (!rpg.state.unlockedWorlds.includes(id)) return
+                setTransitioning(true)
+                window.setTimeout(() => {
+                  setWorld(id)
+                  setMapOpen(false)
+                  window.setTimeout(() => setTransitioning(false), 350)
+                }, 280)
+              }}
+            />
+          </LazyPanelBoundary>
+        ) : null}
         <PlaygroundChat
           worldId={world}
           messages={messages}
@@ -647,8 +662,9 @@ export function PlaygroundScreen() {
         {/* Online chip removed — the chat header now shows live player count + NPC count. */}
         {!focusMode && <NearbyBuildersChip players={remotePlayersInZone} />}
         {!focusMode && (
-          <PlaygroundSidePanel
-            state={rpg.state}
+          <LazyPanelBoundary>
+            <PlaygroundSidePanel
+              state={rpg.state}
             currentWorld={world}
             worlds={PLAYGROUND_WORLDS}
             onSelectWorld={(next) => {
@@ -672,7 +688,8 @@ export function PlaygroundScreen() {
             worldAccent={WORLD_META[world].accent}
             open={!isNarrow || mobileMenuOpen}
             onOpenChange={setMobileMenuOpen}
-          />
+            />
+          </LazyPanelBoundary>
         )}
         {/* Focus mode toggle — eyeball icon (sits in the gap between minimap and quest tracker) */}
         <button

@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from 'react'
 import type { PlaygroundWorldId } from '../lib/playground-rpg'
 import { botsFor } from '../lib/playground-bots'
 
@@ -50,10 +51,23 @@ type Props = {
 }
 
 export function PlaygroundMinimap({ worldId, worldName, worldAccent }: Props) {
-  const npcs = NPC_POSITIONS[worldId] ?? []
-  const bots = botsFor(worldId)
+  const npcs = NPC_POSITIONS[worldId]
+  const bots = useMemo(() => botsFor(worldId), [worldId])
+  const [playerPos, setPlayerPos] = useState({ x: 0, z: 0 })
   // Map world coords (-30..30) to minimap pixels (0..150)
   const map = (v: number) => 75 + (v / 30) * 70
+
+  useEffect(() => {
+    const sync = () => {
+      const player = (window as any).__hermesPlaygroundPlayerPos as { x?: number; z?: number } | undefined
+      const x = typeof player?.x === 'number' ? player.x : 0
+      const z = typeof player?.z === 'number' ? player.z : 0
+      setPlayerPos((prev) => (Math.abs(prev.x - x) < 0.15 && Math.abs(prev.z - z) < 0.15 ? prev : { x, z }))
+    }
+    sync()
+    const id = window.setInterval(sync, 200)
+    return () => window.clearInterval(id)
+  }, [worldId])
 
   return (
     <div className="pointer-events-auto fixed right-3 top-3 z-[70] rounded-2xl border-2 border-white/15 bg-gradient-to-b from-[#0b1320]/90 to-black/85 p-2 text-white shadow-2xl backdrop-blur-xl"
@@ -75,8 +89,8 @@ export function PlaygroundMinimap({ worldId, worldName, worldAccent }: Props) {
           className="absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border"
           style={{ left: 75, top: 75, borderColor: worldAccent + 'aa' }}
         />
-        {/* Player at 0,0 (always center for now since we map world coords) */}
-        <div className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ left: 75, top: 75, width: 8, height: 8, background: '#22d3ee', boxShadow: '0 0 8px #22d3ee' }} />
+        {/* Player marker — sampled at 5 Hz so the minimap never repaints per frame. */}
+        <div className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ left: map(playerPos.x), top: map(playerPos.z), width: 8, height: 8, background: '#22d3ee', boxShadow: '0 0 8px #22d3ee' }} />
         {/* NPCs */}
         {npcs.map((n, i) => (
           <div
