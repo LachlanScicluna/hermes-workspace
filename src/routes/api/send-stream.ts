@@ -390,6 +390,31 @@ export const Route = createFileRoute('/api/send-stream')({
           streamClosed = true
         }
 
+        const persistRunStarted = (
+          runId: string | undefined,
+          runSessionKey: string,
+          friendlyId: string,
+        ) => {
+          if (!runId || persistedRunReady) return
+          activeRunSessionKey = runSessionKey
+          persistedRunReady = createPersistedRun({
+            runId,
+            sessionKey: runSessionKey,
+            friendlyId,
+          }).catch(() => null)
+        }
+
+        const persistActiveRun = (
+          write: (sessionKey: string, runId: string) => Promise<unknown>,
+        ) => {
+          if (!activeRunId || !activeRunSessionKey) return
+          const runId = activeRunId
+          const runSessionKey = activeRunSessionKey
+          void (persistedRunReady ?? Promise.resolve())
+            .then(() => write(runSessionKey, runId))
+            .catch(() => null)
+        }
+
         const stream = new ReadableStream({
           async start(controller) {
             let heartbeatTimer: ReturnType<typeof setInterval> | null = null
@@ -459,31 +484,6 @@ export const Route = createFileRoute('/api/send-stream')({
             heartbeatTimer = setInterval(() => {
               sendEvent('heartbeat', { timestamp: Date.now() })
             }, 30_000)
-
-            const persistRunStarted = (
-              runId: string | undefined,
-              runSessionKey: string,
-              friendlyId: string,
-            ) => {
-              if (!runId || persistedRunReady) return
-              activeRunSessionKey = runSessionKey
-              persistedRunReady = createPersistedRun({
-                runId,
-                sessionKey: runSessionKey,
-                friendlyId,
-              }).catch(() => null)
-            }
-
-            const persistActiveRun = (
-              write: (sessionKey: string, runId: string) => Promise<unknown>,
-            ) => {
-              if (!activeRunId || !activeRunSessionKey) return
-              const runId = activeRunId
-              const runSessionKey = activeRunSessionKey
-              void (persistedRunReady ?? Promise.resolve())
-                .then(() => write(runSessionKey, runId))
-                .catch(() => null)
-            }
 
             try {
               if (chatMode === 'portable') {
