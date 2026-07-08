@@ -8,6 +8,7 @@
   "type": "module",
   "bin": {
     "telegram-message-preview": "./bin/telegram-message-preview",
+    "telegram-update-router-preview": "./bin/telegram-update-router-preview",
     "telegram-natural-language-task-intake": "./bin/telegram-natural-language-task-intake",
     "public-github-discovery-timer-plan": "./bin/public-github-discovery-timer-plan",
     "public-github-discovery-timer-install": "./bin/public-github-discovery-timer-install",
