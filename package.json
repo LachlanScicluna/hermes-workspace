@@ -27,7 +27,8 @@
     "telegram-research-implementation-proposal": "./bin/telegram-research-implementation-proposal",
     "telegram-approved-implementation-build-plan": "./bin/telegram-approved-implementation-build-plan",
     "telegram-code-edit-approval-packet": "./bin/telegram-code-edit-approval-packet",
-    "telegram-source-code-edit-lane": "./bin/telegram-source-code-edit-lane"
+    "telegram-source-code-edit-lane": "./bin/telegram-source-code-edit-lane",
+    "kanban-triage-shadow": "./bin/kanban-triage-shadow"
   },
   "main": "electron/main.cjs",
   "scripts": {
